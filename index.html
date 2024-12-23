@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Editor</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #1e40af;
+            --background-color: #f8fafc;
+            --border-color: #e2e8f0;
+            --text-color: #1e293b;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .pdf-editor-container {
+            background: white;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px var(--shadow-color);
+            width: 100%;
+            max-width: 800px;
+            overflow: hidden;
+        }
+
+        .pdf-editor-header {
+            background: var(--primary-color);
+            color: white;
+            padding: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pdf-editor-header h4 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .pdf-editor-close-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            transition: background-color 0.2s;
+        }
+
+        .pdf-editor-close-btn:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .pdf-editor-main {
+            padding: 2rem;
+        }
+
+        .upload-section {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .upload-section input[type="file"] {
+            display: none;
+        }
+
+        .upload-label {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            font-weight: 500;
+        }
+
+        .upload-label:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .preview-section {
+            margin-bottom: 2rem;
+            border: 2px dashed var(--border-color);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            min-height: 300px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #pdfCanvas {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .actions-section {
+            text-align: center;
+        }
+
+        #processButton {
+            padding: 1rem 2rem;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        #processButton:hover:not(:disabled) {
+            background-color: var(--secondary-color);
+            transform: translateY(-1px);
+        }
+
+        #processButton:disabled {
+            background-color: var(--border-color);
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .loading {
+            position: relative;
+            opacity: 0.7;
+        }
+
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid #ffffff;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: loading 0.8s linear infinite;
+        }
+
+        @keyframes loading {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="pdf-editor-container">
+        <div class="pdf-editor-header">
+            <h4>Poshak Name Change</h4>
+            <button class="pdf-editor-close-btn">&times;</button>
+        </div>
+        <div class="pdf-editor-main">
+            <div class="upload-section">
+                <input type="file" id="pdfInput" accept=".pdf" />
+                <label for="pdfInput" class="upload-label">Choose PDF file</label>
+            </div>
+            <div class="preview-section">
+                <canvas id="pdfCanvas"></canvas>
+            </div>
+            <div class="actions-section">
+                <button id="processButton" disabled>Process and Download</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const pdfInput = document.getElementById('pdfInput');
+            const pdfCanvas = document.getElementById('pdfCanvas');
+            const processButton = document.getElementById('processButton');
+            const closeButton = document.querySelector('.pdf-editor-close-btn');
+            
+            let pdfFile = null;
+
+            closeButton.addEventListener('click', function() {
+                window.close();
+            });
+
+            pdfInput.addEventListener('change', async function(e) {
+                const file = e.target.files[0];
+                if (file && file.type === 'application/pdf') {
+                    pdfFile = file;
+                    await renderPreview(file);
+                    processButton.disabled = false;
+                }
+            });
+
+            async function renderPreview(file) {
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                    const page = await pdf.getPage(1);
+                    
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    pdfCanvas.width = viewport.width;
+                    pdfCanvas.height = viewport.height;
+
+                    await page.render({
+                        canvasContext: pdfCanvas.getContext('2d'),
+                        viewport: viewport
+                    }).promise;
+                } catch (error) {
+                    console.error('Preview error:', error);
+                    alert('Error previewing PDF');
+                }
+            }
+
+            async function processPage(page, pdfJsPage, helveticaFont, helveticaBoldFont) {
+                const textContent = await pdfJsPage.getTextContent();
+                const replacements = [];
+
+                const replacementRules = [
+                    {
+                        match: (text) => text.includes('Bill To:') && text.includes('TAVORA ENTERPRISES'),
+                        newText: 'Bill To: MAHABALESHWAR S DANGUI & CO',
+                        bold: true
+                    },
+                    {
+                        match: (text) => text.includes('Ship To:') && text.includes('TAVORA ENTERPRISES'),
+                        newText: 'Ship To: MAHABALESHWAR S DANGUI & CO',
+                        bold: true
+                    },
+                    {
+                        match: (text) => text.includes('NEAR NAVTARA RESTAURANT') || text.includes('MUNIC PANJIM GOA'),
+                        newText: 'M.G ROAD,PANAJI',
+                        bold: false
+                    },
+                    {
+                        match: (text) => text.includes('PANJIM') && text.includes('State: GOA'),
+                        newText: 'PANJIM      State: GOA(30)',
+                        bold: false
+                    },
+                    {
+                        match: (text) => text.includes('Phone: 8322220434 /') ,
+                        newText: 'Phone: 9422445525',
+                        bold: false
+                    },
+                    {
+                        match: (text) => text.includes('GSTIN: 30AAAFT8453E1ZH'),
+                        newText: 'GSTIN: 30AAEFM6750F1ZM',
+                        bold: false
+                    }
+                ];
+
+                for (const item of textContent.items) {
+                    const text = item.str.trim();
+                    const [x, y] = item.transform.slice(4, 6);
+
+                    for (const rule of replacementRules) {
+                        if (rule.match(text)) {
+                            console.log(`Found matching text on page: ${text}`);
+                            replacements.push({
+                                x,
+                                y,
+                                oldText: text,
+                                newText: rule.newText,
+                                font: rule.bold ? helveticaBoldFont : helveticaFont,
+                                size: item.height
+                            });
+                            break;
+                        }
+                    }
+                }
+
+                for (const replacement of replacements) {
+                    page.drawRectangle({
+                        x: replacement.x,
+                        y: replacement.y,
+                        width: replacement.font.widthOfTextAtSize(replacement.oldText, replacement.size) + 2,
+                        height: replacement.size + 2,
+                        color: PDFLib.rgb(1, 1, 1),
+                    });
+
+                    page.drawText(replacement.newText, {
+                        x: replacement.x,
+                        y: replacement.y,
+                        font: replacement.font,
+                        size: replacement.size,
+                    });
+                }
+
+                return replacements.length > 0;
+            }
+
+            processButton.addEventListener('click', async function() {
+                if (!pdfFile) return;
+
+                try {
+                    processButton.classList.add('loading');
+                    processButton.disabled = true;
+
+                    const arrayBuffer = await pdfFile.arrayBuffer();
+                    const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+                    const pdfJsDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    
+                    const helveticaFont = await pdfDoc.embedFont(PDFLib.StandardFonts.Helvetica);
+                    const helveticaBoldFont = await pdfDoc.embedFont(PDFLib.StandardFonts.HelveticaBold);
+
+                    const totalPages = pdfDoc.getPageCount();
+                    console.log(`Processing ${totalPages} pages`);
+                    
+                    let modificationsFound = false;
+
+                    for (let i = 0; i < totalPages; i++) {
+                        const pageNum = i + 1;
+                        console.log(`Processing page ${pageNum}`);
+                        
+                        const pdfLibPage = pdfDoc.getPages()[i];
+                        const pdfJsPage = await pdfJsDoc.getPage(pageNum);
+                        
+                        const pageModified = await processPage(pdfLibPage, pdfJsPage, helveticaFont, helveticaBoldFont);
+                        if (pageModified) {
+                            modificationsFound = true;
+                        }
+                    }
+
+                    if (!modificationsFound) {
+                        console.log('No matching text found in any page');
+                        alert('No matching text found to replace');
+                        return;
+                    }
+
+                    const modifiedPdfBytes = await pdfDoc.save();
+                    const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'modified_invoice.pdf';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                } catch (error) {
+                    console.error('Processing error:', error);
+                    alert('Error processing PDF. Check console for details.');
+                } finally {
+                    processButton.classList.remove('loading');
+                    processButton.disabled = false;
+                }
+            });
+        });
+    </script>
+</body>
+</html>
